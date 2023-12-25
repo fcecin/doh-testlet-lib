@@ -14,6 +14,32 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 
 // ---------------------------------------------------------------------
+// checkRequiredVariables()
+//
+// Takes a vararg list of environment variable names and throws an
+//   exception if any one of these expected environment variables is
+//   unset (i.e. evaluates to an empty string)
+// ---------------------------------------------------------------------
+
+function checkRequiredVariables(...variables) {
+    const undefinedVariables = variables.filter(variable => !process.env[variable]);
+    if (undefinedVariables.length > 0) {
+        throw new Error(`ERROR: dohTestletLib.js: checkRequiredVariables(${variables}): Some required environment variables are not defined: ${undefinedVariables.join(', ')}`);
+    }
+}
+
+// ---------------------------------------------------------------------
+// getVariable()
+//
+// Simple wrapper to process.env that returns "" for nonexistent,
+//   undefined environment variables (which is the behavior in shell).
+// ---------------------------------------------------------------------
+
+function getVariable(variableName) {
+    return process.env[variableName] || "";
+}
+
+// ---------------------------------------------------------------------
 // pushAction()
 //
 // This loads an entity dataFile in the standard DoH2 format and
@@ -65,5 +91,7 @@ function pushAction(dataFile, contractName, actionName, cleosUrl = "", cleosWall
 // ---------------------------------------------------------------------
 
 module.exports = {
+    checkRequiredVariables,
+    getVariable,
     pushAction
 };
