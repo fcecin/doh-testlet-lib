@@ -3,11 +3,6 @@
 //
 // This is where we put all of the JS functionality that the
 //   development/interactive tests need.
-//
-// This probably goes into a node_modules in doh-tester that can be
-//   require()'d by any testlet in any application contract repository
-//   and directory. It's in the same directory as the testlet because
-//   this is a demo.
 // ---------------------------------------------------------------------
 
 const fs = require('fs');
@@ -21,46 +16,70 @@ const { execSync } = require('child_process');
 // What we do here is we look for .env in the current directory, and
 //   if it is not found, we successively search the parent directory
 //   until we find one.
+//
+// EXCEPTION: If the CTH_PATH environment variable is set, then that
+//   means we are running inside the cth environment, and not from
+//   an interactive setup. In that case, we do not load .env files,
+//   and instead rely on the Cth/DoH automated test libraries to
+//   set the environment variables to their proper values, allowing
+//   testlets called from cth automated tests to find and use the
+//   correct, automated-testing-compatible parameter values for cleos.
 // ---------------------------------------------------------------------
 
-const path = require('path');
-const dotenv = require('dotenv');
+if (process.env.CTH_PATH) {
+    console.log("INFO: dohTestletLib.js: CTH_PATH is set (automated test environment detected, as opposed to interactive), so .env will not be loaded.");
 
-function __findDotenv(currentDir) {
-    const root = path.parse(currentDir).root;
-    while (true) {
-        const dotenvPath = path.join(currentDir, '.env');
-        if (fs.existsSync(dotenvPath))
-            return dotenvPath;
-        if (currentDir === root)
-            return null;
-        currentDir = path.join(currentDir, '..');
-    }
-}
+    const sortedEnv = Object.keys(process.env).sort().reduce((sorted, key) => { sorted[key] = process.env[key]; return sorted; }, {});
+    console.log("INFO: dohTestletLib.js: Current environment variables (ALL of them): " + JSON.stringify(sortedEnv, null, 2));
+} else {
+    const path = require('path');
+    const dotenv = require('dotenv');
 
-const dotenvPath = __findDotenv(__dirname);
-if (dotenvPath) {
-    const originalEnv = JSON.parse(JSON.stringify(process.env));
-
-    dotenv.config({ path: dotenvPath });
-    console.log('DoH Testlet Lib: applied ' + dotenvPath);
-
-    // Identify new and changed environment variables
-    const newVars = [];
-    const changedVars = [];
-    for (const key in process.env) {
-        if (!(key in originalEnv)) {
-            newVars.push(key);
-        } else if (process.env[key] !== originalEnv[key]) {
-            changedVars.push(key);
+    function __findDotenv(currentDir) {
+        const root = path.parse(currentDir).root;
+        while (true) {
+            const dotenvPath = path.join(currentDir, '.env');
+            if (fs.existsSync(dotenvPath))
+                return dotenvPath;
+            if (currentDir === root)
+                return null;
+            currentDir = path.join(currentDir, '..');
         }
     }
-    console.log("DoH Testlet Lib: environment variables set:");
-    newVars.forEach(key => console.log(`  ${key}: ${process.env[key]}`));
-    changedVars.forEach(key => console.log(`  ${key}: ${process.env[key]} (was ${originalEnv[key]})`));
 
-} else {
-    console.log('WARNING: DoH Testlet Lib: .env file not found');
+    const dotenvPath = __findDotenv(__dirname);
+    if (dotenvPath) {
+        const originalEnv = JSON.parse(JSON.stringify(process.env));
+
+        // NOTE: We are using the { override: true } option in dotenv.config()
+        //       This means that loading an .env file WILL overwrite variables that were already defined.
+        //       I *think* this is what we want, as it satisfies the Principle of Least Astonishment.
+        //
+        dotenv.config({ path: dotenvPath, override: true });
+
+        console.log('DoH Testlet Lib: applied ' + dotenvPath);
+
+        // Identify new and changed environment variables
+        const newVars = [];
+        const changedVars = [];
+        for (const key in process.env) {
+            if (!(key in originalEnv)) {
+                newVars.push(key);
+            } else if (process.env[key] !== originalEnv[key]) {
+                changedVars.push(key);
+            }
+        }
+        if (newVars.length === 0 && changedVars.length === 0) {
+            console.log("DoH Testlet Lib: no environment variable changes detected.");
+        } else {
+            console.log("DoH Testlet Lib: environment variables set:");
+            newVars.forEach(key => console.log(`  ${key}: ${process.env[key]}`));
+            changedVars.forEach(key => console.log(`  ${key}: ${process.env[key]} (was ${originalEnv[key]})`));
+        }
+
+    } else {
+        console.log('WARNING: DoH Testlet Lib: .env file not found');
+    }
 }
 
 // ---------------------------------------------------------------------
