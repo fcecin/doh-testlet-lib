@@ -9,8 +9,10 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 
 // ---------------------------------------------------------------------
-// Using require('doh-testlet-lib') will automatically load the .env
-//   file using the dotenv JS package.
+// config()
+//
+// Using require('doh-testlet-lib').config() will automatically load
+//   the .env file using the dotenv JS package.
 // dotenv doesn't properly search for the .env file; instead, you have
 //   to tell it where it is, unless it is in the current directory.
 // What we do here is we look for .env in the current directory, and
@@ -26,60 +28,67 @@ const { execSync } = require('child_process');
 //   correct, automated-testing-compatible parameter values for cleos.
 // ---------------------------------------------------------------------
 
-if (process.env.CTH_PATH) {
-    console.log("INFO: dohTestletLib.js: CTH_PATH is set (automated test environment detected, as opposed to interactive), so .env will not be loaded.");
+function config() {
 
-    const sortedEnv = Object.keys(process.env).sort().reduce((sorted, key) => { sorted[key] = process.env[key]; return sorted; }, {});
-    console.log("INFO: dohTestletLib.js: Current environment variables (ALL of them): " + JSON.stringify(sortedEnv, null, 2));
-} else {
-    const path = require('path');
-    const dotenv = require('dotenv');
+    if (process.env.CTH_PATH) {
+        console.log("INFO: dohTestletLib.js: config(): CTH_PATH is set (automated test environment detected, as opposed to interactive), so .env will not be loaded.");
 
-    function __findDotenv(currentDir) {
-        const root = path.parse(currentDir).root;
-        while (true) {
-            const dotenvPath = path.join(currentDir, '.env');
-            if (fs.existsSync(dotenvPath))
-                return dotenvPath;
-            if (currentDir === root)
-                return null;
-            currentDir = path.join(currentDir, '..');
-        }
-    }
+        const sortedEnv = Object.keys(process.env).sort().reduce((sorted, key) => { sorted[key] = process.env[key]; return sorted; }, {});
+        console.log("INFO: dohTestletLib.js: config(): Current environment variables (ALL of them): " + JSON.stringify(sortedEnv, null, 2));
+    } else {
+        const path = require('path');
+        const dotenv = require('dotenv');
 
-    const dotenvPath = __findDotenv(__dirname);
-    if (dotenvPath) {
-        const originalEnv = JSON.parse(JSON.stringify(process.env));
-
-        // NOTE: We are using the { override: true } option in dotenv.config()
-        //       This means that loading an .env file WILL overwrite variables that were already defined.
-        //       I *think* this is what we want, as it satisfies the Principle of Least Astonishment.
-        //
-        dotenv.config({ path: dotenvPath, override: true });
-
-        console.log('DoH Testlet Lib: applied ' + dotenvPath);
-
-        // Identify new and changed environment variables
-        const newVars = [];
-        const changedVars = [];
-        for (const key in process.env) {
-            if (!(key in originalEnv)) {
-                newVars.push(key);
-            } else if (process.env[key] !== originalEnv[key]) {
-                changedVars.push(key);
+        function __findDotenv(currentDir) {
+            const root = path.parse(currentDir).root;
+            while (true) {
+                const dotenvPath = path.join(currentDir, '.env');
+                if (fs.existsSync(dotenvPath))
+                    return dotenvPath;
+                if (currentDir === root)
+                    return null;
+                currentDir = path.join(currentDir, '..');
             }
         }
-        if (newVars.length === 0 && changedVars.length === 0) {
-            console.log("DoH Testlet Lib: no environment variable changes detected.");
-        } else {
-            console.log("DoH Testlet Lib: environment variables set:");
-            newVars.forEach(key => console.log(`  ${key}: ${process.env[key]}`));
-            changedVars.forEach(key => console.log(`  ${key}: ${process.env[key]} (was ${originalEnv[key]})`));
-        }
 
-    } else {
-        console.log('WARNING: DoH Testlet Lib: .env file not found');
+        const dotenvPath = __findDotenv(__dirname);
+        if (dotenvPath) {
+            const originalEnv = JSON.parse(JSON.stringify(process.env));
+
+            // NOTE: We are using the { override: true } option in dotenv.config()
+            //       This means that loading an .env file WILL overwrite variables that were already defined.
+            //       I *think* this is what we want, as it satisfies the Principle of Least Astonishment.
+            //
+            dotenv.config({ path: dotenvPath, override: true });
+
+            console.log('INFO: dohTestletLib.js: config(): applied ' + dotenvPath);
+
+            // Identify new and changed environment variables
+            const newVars = [];
+            const changedVars = [];
+            for (const key in process.env) {
+                if (!(key in originalEnv)) {
+                    newVars.push(key);
+                } else if (process.env[key] !== originalEnv[key]) {
+                    changedVars.push(key);
+                }
+            }
+            if (newVars.length === 0 && changedVars.length === 0) {
+                console.log("INFO: dohTestletLib.js: config(): no environment variable changes detected.");
+            } else {
+                console.log("INFO: dohTestletLib.js: config(): environment variables set:");
+                newVars.forEach(key => console.log(`  ${key}: ${process.env[key]}`));
+                changedVars.forEach(key => console.log(`  ${key}: ${process.env[key]} (was ${originalEnv[key]})`));
+            }
+
+        } else {
+            console.log('WARNING: dohTestletLib.js: config(): .env file not found');
+        }
     }
+
+    // Chain it so you can do
+    //   const tl = require('doh-testlet-lib').config();
+    return module.exports;
 }
 
 // ---------------------------------------------------------------------
@@ -191,5 +200,6 @@ module.exports = {
     checkRequiredVariables,
     getVariable,
     pushAction,
-    singlePushAction
+    singlePushAction,
+    config
 };
