@@ -8,5 +8,8 @@
   },
   "keywords": ["testlet", "library"],
   "author": "Author",
-  "license": "License"
+  "license": "License",
+  "dependencies": {
+    "dotenv": "^16.3.1"
+  }
 }
