@@ -138,7 +138,21 @@ function singlePushAction(actionData, contractName, actionName, authority, cleos
     let cleosWalletUrlOpt = '';
     if (cleosWalletUrl !== '') { cleosWalletUrlOpt = `--wallet-url ${cleosWalletUrl}`; }
 
-    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${otherOpts} push action ${contractName} ${actionName} '${actionData}' -p ${authority}`;
+    // Options to be moved from the otherOpts string to the globalOpts string
+    // (these are global cleos options, instead of options that depend on which
+    //   cleos subcommand you are using, which have to appear after the command is stated,
+    //   whereas global options have to appear before the command is stated).
+    // We don't want to add another environment variable just for this cleos idiosyncrasy.
+    const globalOptsList = ['--no-verify', '--no-auto-keosd', '-v', '--verbose', '--print-request', '--print-response', '--http-verbose', '--http-trace'];
+    let globalOpts = '';
+    otherOpts.split(' ').forEach(opt => {
+        if (globalOptsList.includes(opt)) {
+            globalOpts += `${opt} `;
+            otherOpts = otherOpts.replace(opt, '');
+        }
+    });
+
+    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${globalOpts} push action ${contractName} ${actionName} '${actionData}' -p ${authority} ${otherOpts}`;
 
     // Log it
     console.log(cleosCmd);
