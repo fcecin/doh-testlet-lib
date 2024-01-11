@@ -34,7 +34,12 @@ function config() {
         console.log("INFO: dohTestletLib.js: config(): CTH_PATH is set (automated test environment detected, as opposed to interactive), so .env will not be loaded.");
 
         const sortedEnv = Object.keys(process.env).sort().reduce((sorted, key) => { sorted[key] = process.env[key]; return sorted; }, {});
-        console.log("INFO: dohTestletLib.js: config(): Current environment variables (ALL of them): " + JSON.stringify(sortedEnv, null, 2));
+
+        // This is too much info; makes the log unusable.
+        // Should add it back when we have a way to do a "TRACE=true" option for the testlet lib.
+        //
+        //console.log("INFO: dohTestletLib.js: config(): Current environment variables (ALL of them): " + JSON.stringify(sortedEnv, null, 2));
+
     } else {
         const path = require('path');
         const dotenv = require('dotenv');
@@ -89,6 +94,21 @@ function config() {
     // Chain it so you can do
     //   const tl = require('doh-testlet-lib').config();
     return module.exports;
+}
+
+// ---------------------------------------------------------------------
+// Enable/disable echoing of cleos commands to the output.
+// ---------------------------------------------------------------------
+
+function setEcho(value) {
+    __DoHTestletLibEcho = value;
+}
+
+function getEcho() {
+    // default is echo enabled
+    if (typeof __DoHTestletLibEcho === 'undefined') { return true; }
+    // otherwise return what is set
+    return __DoHTestletLibEcho;
 }
 
 // ---------------------------------------------------------------------
@@ -155,10 +175,21 @@ function singlePushAction(actionData, contractName, actionName, authority, cleos
     let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${globalOpts} push action ${contractName} ${actionName} '${actionData}' -p ${authority} ${otherOpts}`;
 
     // Log it
-    console.log(cleosCmd);
+    if (getEcho()) {
+        console.log(cleosCmd);
+    }
 
-    // Throws an exception if cleos fails
-    execSync(cleosCmd);
+    // execSync() throws an exception if cleos (the invoked process) fails, which is what we want.
+    //
+    // All output (e.g. contract prints) will be echoed thanks to stdio: 'inherit'.
+    //execSync(cleosCmd, { stdio: 'inherit' });
+    //
+    // Instead:
+    // - Capture the output in a string and return it (so the caller can scan it if needed).
+    // - ALSO echo it (as would be the case in a shell script).
+    const cleosOutput = execSync(cleosCmd, { stdio: 'pipe' }).toString();
+    console.log(cleosOutput);
+    return cleosOutput;
 }
 
 // ---------------------------------------------------------------------
@@ -208,12 +239,62 @@ function pushAction(dataFile, contractName, actionName, cleosUrl = "", cleosWall
 }
 
 // ---------------------------------------------------------------------
+// getTable()
+//
+// Gets a table with given query parameters, returns the result.
+// ---------------------------------------------------------------------
+
+function getTable(contractName, scopeName, tableName, queryOpts, cleosUrl = "", cleosWalletUrl = "", otherOpts = "") {
+
+    let cleosUrlOpt = '';
+    if (cleosUrl !== '') { cleosUrlOpt = `-u ${cleosUrl}`; }
+    let cleosWalletUrlOpt = '';
+    if (cleosWalletUrl !== '') { cleosWalletUrlOpt = `--wallet-url ${cleosWalletUrl}`; }
+
+    // Options to be moved from the otherOpts string to the globalOpts string
+    // (these are global cleos options, instead of options that depend on which
+    //   cleos subcommand you are using, which have to appear after the command is stated,
+    //   whereas global options have to appear before the command is stated).
+    // We don't want to add another environment variable just for this cleos idiosyncrasy.
+    const globalOptsList = ['--no-verify', '--no-auto-keosd', '-v', '--verbose', '--print-request', '--print-response', '--http-verbose', '--http-trace'];
+    let globalOpts = '';
+    otherOpts.split(' ').forEach(opt => {
+        if (globalOptsList.includes(opt)) {
+            globalOpts += `${opt} `;
+            otherOpts = otherOpts.replace(opt, '');
+        }
+    });
+
+    // For get table, ${otherOpts} (after getting the global options) is dropped (it would contain options that are for
+    //   push action, like --force-unique). This allows the caller to use the same options env var for both
+    //   push action and get table.
+
+    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${globalOpts} get table ${contractName} ${scopeName} ${tableName} ${queryOpts}`;
+
+    // Log it
+    if (getEcho()) {
+        console.log(cleosCmd);
+    }
+
+    // execSync() throws an exception if cleos (the invoked process) fails, which is what we want.
+    //
+    // - Capture the output in a string and return it (so the caller can scan it if needed).
+    // - ALSO echo it (as would be the case in a shell script).
+    const cleosOutput = execSync(cleosCmd, { stdio: 'pipe' }).toString();
+    console.log(cleosOutput);
+    return cleosOutput;
+}
+
+// ---------------------------------------------------------------------
 // ---------------------------------------------------------------------
 
 module.exports = {
+    config,
+    setEcho,
+    getEcho,
     checkRequiredVariables,
     getVariable,
     pushAction,
     singlePushAction,
-    config
+    getTable
 };
