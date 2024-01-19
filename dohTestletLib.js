@@ -112,6 +112,21 @@ function getEcho() {
 }
 
 // ---------------------------------------------------------------------
+// Enable/disable logging of cleos results to the output.
+// ---------------------------------------------------------------------
+
+function setEchoResult(value) {
+    __DoHTestletLibEchoResult = value;
+}
+
+function getEchoResult() {
+    // default is echo enabled
+    if (typeof __DoHTestletLibEchoResult === 'undefined') { return true; }
+    // otherwise return what is set
+    return __DoHTestletLibEchoResult;
+}
+
+// ---------------------------------------------------------------------
 // checkRequiredVariables()
 //
 // Takes a vararg list of environment variable names and throws an
@@ -188,7 +203,9 @@ function singlePushAction(actionData, contractName, actionName, authority, cleos
     // - Capture the output in a string and return it (so the caller can scan it if needed).
     // - ALSO echo it (as would be the case in a shell script).
     const cleosOutput = execSync(cleosCmd, { stdio: 'pipe' }).toString();
-    console.log(cleosOutput);
+    if (getEchoResult()) {
+        console.log(cleosOutput);
+    }
     return cleosOutput;
 }
 
@@ -281,9 +298,47 @@ function getTable(contractName, scopeName, tableName, queryOpts, cleosUrl = "", 
     // - Capture the output in a string and return it (so the caller can scan it if needed).
     // - ALSO echo it (as would be the case in a shell script).
     const cleosOutput = execSync(cleosCmd, { stdio: 'pipe' }).toString();
-    console.log(cleosOutput);
+    if (getEchoResult()) {
+        console.log(cleosOutput);
+    }
     return cleosOutput;
 }
+
+// ---------------------------------------------------------------------
+// cleos()
+//
+// Calls cleos with the given parameters and returns the result.
+//
+// Except for the API node URL and the wallet URL, all cleos options
+//   (--force-unique, --verbose, etc.) have to be passed as part of
+//   cleosParams.
+// ---------------------------------------------------------------------
+
+function cleos(cleosParams, cleosUrl = "", cleosWalletUrl = "") {
+
+    let cleosUrlOpt = '';
+    if (cleosUrl !== '') { cleosUrlOpt = `-u ${cleosUrl}`; }
+    let cleosWalletUrlOpt = '';
+    if (cleosWalletUrl !== '') { cleosWalletUrlOpt = `--wallet-url ${cleosWalletUrl}`; }
+
+    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${cleosParams}`;
+
+    // Log it
+    if (getEcho()) {
+        console.log(cleosCmd);
+    }
+
+    // execSync() throws an exception if cleos (the invoked process) fails, which is what we want.
+    //
+    // - Capture the output in a string and return it (so the caller can scan it if needed).
+    // - ALSO echo it (as would be the case in a shell script).
+    const cleosOutput = execSync(cleosCmd, { stdio: 'pipe' }).toString();
+    if (getEchoResult()) {
+        console.log(cleosOutput);
+    }
+    return cleosOutput;
+}
+
 
 // ---------------------------------------------------------------------
 // ---------------------------------------------------------------------
@@ -292,9 +347,12 @@ module.exports = {
     config,
     setEcho,
     getEcho,
+    setEchoResult,
+    getEchoResult,
     checkRequiredVariables,
     getVariable,
     pushAction,
     singlePushAction,
-    getTable
+    getTable,
+    cleos
 };
