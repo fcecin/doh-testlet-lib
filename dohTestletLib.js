@@ -3,10 +3,27 @@
 //
 // This is where we put all of the JS functionality that the
 //   development/interactive tests need.
+//
+// To reduce verbosity, you have these options:
+// - set the environment variable DOH_TESTLET_LIB_QUIET = 1, which
+//   reduces diagnostic output.
+// - call setEcho(false) at each top-level testlet that you run
+//   (that is, call from the shell, or call with dohRunTestlet()),
+//   which disables printing the cleos command that is executed.
+// - call setEchoResult(false) at each top-level testlet that you
+//   run, which disabled printing the cleos command output.
+//
+// Even with echoResult() disabled, you can still get the result of
+//   cleos commands that you care about by capturing the string
+//   returned by singlePushAction(), pushAction(), getTable() or
+//   cleos().
 // ---------------------------------------------------------------------
 
 const fs = require('fs');
 const { execSync } = require('child_process');
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
+const deasync = require('deasync');
 
 // ---------------------------------------------------------------------
 // config()
@@ -31,14 +48,14 @@ const { execSync } = require('child_process');
 function config() {
 
     if (process.env.CTH_PATH) {
-        console.log("INFO: dohTestletLib.js: config(): CTH_PATH is set (automated test environment detected, as opposed to interactive), so .env will not be loaded.");
+        verboseLog('INFO: dohTestletLib.js: config(): CTH_PATH is set (automated test environment detected, as opposed to interactive), so .env will not be loaded.');
 
         const sortedEnv = Object.keys(process.env).sort().reduce((sorted, key) => { sorted[key] = process.env[key]; return sorted; }, {});
 
         // This is too much info; makes the log unusable.
         // Should add it back when we have a way to do a "TRACE=true" option for the testlet lib.
         //
-        //console.log("INFO: dohTestletLib.js: config(): Current environment variables (ALL of them): " + JSON.stringify(sortedEnv, null, 2));
+        //verboseLog("INFO: dohTestletLib.js: config(): Current environment variables (ALL of them): " + JSON.stringify(sortedEnv, null, 2));
 
     } else {
         const path = require('path');
@@ -79,11 +96,11 @@ function config() {
                 }
             }
             if (newVars.length === 0 && changedVars.length === 0) {
-                console.log("INFO: dohTestletLib.js: config(): no environment variable changes detected.");
+                verboseLog("INFO: dohTestletLib.js: config(): no environment variable changes detected.");
             } else {
-                console.log("INFO: dohTestletLib.js: config(): environment variables set:");
-                newVars.forEach(key => console.log(`  ${key}: ${process.env[key]}`));
-                changedVars.forEach(key => console.log(`  ${key}: ${process.env[key]} (was ${originalEnv[key]})`));
+                verboseLog("INFO: dohTestletLib.js: config(): environment variables set:");
+                newVars.forEach(key => verboseLog(`  ${key}: ${process.env[key]}`));
+                changedVars.forEach(key => verboseLog(`  ${key}: ${process.env[key]} (was ${originalEnv[key]})`));
             }
 
         } else {
@@ -94,6 +111,17 @@ function config() {
     // Chain it so you can do
     //   const tl = require('doh-testlet-lib').config();
     return module.exports;
+}
+
+// ---------------------------------------------------------------------
+// Verbose logging of what the testlets library is doing is disabled if
+//   the DOH_TESTLET_LIB_QUIET env var is set.
+// ---------------------------------------------------------------------
+
+function verboseLog(...args) {
+    if (! (getVariable('DOH_TESTLET_LIB_QUIET'))) {
+        console.log(...args);
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -187,26 +215,21 @@ function singlePushAction(actionData, contractName, actionName, authority, cleos
         }
     });
 
-    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${globalOpts} push action ${contractName} ${actionName} '${actionData}' -p ${authority} ${otherOpts}`;
+    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${globalOpts} push action ${contractName} ${actionName} '${actionData}' -p ${authority} ${otherOpts} 2>&1`;
 
-    // Log it
+    // Log it conditionally
     if (getEcho()) {
         console.log(cleosCmd);
     }
 
     // execSync() throws an exception if cleos (the invoked process) fails, which is what we want.
-    //
-    // All output (e.g. contract prints) will be echoed thanks to stdio: 'inherit'.
-    //execSync(cleosCmd, { stdio: 'inherit' });
-    //
-    // Instead:
     // - Capture the output in a string and return it (so the caller can scan it if needed).
-    // - ALSO echo it (as would be the case in a shell script).
-    const cleosOutput = execSync(cleosCmd, { stdio: 'pipe' }).toString();
+    // - Echo it conditionally (execSync drops stderr, but stderr is piped to stdout with 2>&1 above)
+    const output = execSync(cleosCmd, { stdio: 'pipe' }).toString();
     if (getEchoResult()) {
-        console.log(cleosOutput);
+        console.log(output);
     }
-    return cleosOutput;
+    return output;
 }
 
 // ---------------------------------------------------------------------
@@ -219,15 +242,46 @@ function singlePushAction(actionData, contractName, actionName, authority, cleos
 // This will later be converted to async/parallel code.
 // ---------------------------------------------------------------------
 
+// Async version of singlePushAction() to help parallelize pushAction()
+async function singlePushActionAsync(actionData, contractName, actionName, authority, cleosUrl = "", cleosWalletUrl = "", otherOpts = "") {
+
+    if (typeof actionData !== 'string')
+        actionData = JSON.stringify(actionData);
+
+    let cleosUrlOpt = '';
+    if (cleosUrl !== '') { cleosUrlOpt = `-u ${cleosUrl}`; }
+    let cleosWalletUrlOpt = '';
+    if (cleosWalletUrl !== '') { cleosWalletUrlOpt = `--wallet-url ${cleosWalletUrl}`; }
+
+    const globalOptsList = ['--no-verify', '--no-auto-keosd', '-v', '--verbose', '--print-request', '--print-response', '--http-verbose', '--http-trace'];
+    let globalOpts = '';
+    otherOpts.split(' ').forEach(opt => {
+        if (globalOptsList.includes(opt)) {
+            globalOpts += `${opt} `;
+            otherOpts = otherOpts.replace(opt, '');
+        }
+    });
+
+    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${globalOpts} push action ${contractName} ${actionName} '${actionData}' -p ${authority} ${otherOpts} 2>&1`;
+
+    // This is the different part (await exec vs. execSync)
+    const result = await exec(cleosCmd);
+
+    // stdout contains stderr as well due to 2>&1
+    // return both the command echo, and the command result; caller
+    //   decides what to do with those.
+    return [ cleosCmd, result.stdout ];
+}
+
 function pushAction(dataFile, contractName, actionName, cleosUrl = "", cleosWalletUrl = "", otherOpts = "") {
 
     let args = `${contractName}, ${actionName}, ${dataFile}`;
 
-    if (! fs.existsSync(dataFile)) {
+    if (!fs.existsSync(dataFile)) {
         throw new Error(`ERROR: pushAction(${args}): Data file '${dataFile}' not found (current working dir: ` + process.cwd() + ')');
     }
 
-    console.log(`pushAction(${args}): loading data file...`);
+    verboseLog(`pushAction(${args}): loading data file...`);
 
     let myArray;
     try {
@@ -240,19 +294,55 @@ function pushAction(dataFile, contractName, actionName, cleosUrl = "", cleosWall
         throw new Error(`ERROR: pushAction(${args}): Failed to load data file:` + error);
     }
 
-    console.log(`pushAction(${args}): pushing ${myArray.length} items...`);
+    verboseLog(`pushAction(${args}): pushing ${myArray.length} items (in parallel)...`);
 
-    for (let i = 0; i < myArray.length; i++) {
+    let allPromisesCompleted = false;
 
-        // The surrounding brackets [] denote that the parameters to the action are positional,
-        //   which is how pushAction() (this batch pushing method) works.
-        // The DoH entity data file (.json data file) is in [variantname, variantdata] format,
-        //   and that is passed as the single argument to the action.
-        //
-        let argStr = '[' + JSON.stringify(myArray[i]) + ']';
+    const promises = myArray.map(item => {
+        let argStr = '[' + JSON.stringify(item) + ']';
+        return singlePushActionAsync(argStr, contractName, actionName, contractName, cleosUrl, cleosWalletUrl, otherOpts);
+    });
 
-        singlePushAction(argStr, contractName, actionName, contractName, cleosUrl, cleosWalletUrl, otherOpts);
-    }
+    // Full result for the caller to use
+    let returnStr = '';
+
+    Promise.all(promises).then(results => {
+        let echoStr = ''; // Compute the conditional echoing
+        results.forEach(res => {
+
+            // command echos are never returned by the function; this is
+            //   consistent with singlePushAction(), getTable() and cleos(),
+            //   which return stdout/stderr only.
+            //returnStr += res[0] + '\n';
+
+            returnStr += res[1] + '\n';
+            if (getEcho()) {
+                echoStr += res[0] + '\n';
+            }
+            if (getEchoResult()) {
+                echoStr += res[1] + '\n';
+            }
+        });
+        returnStr = returnStr.trim();
+        echoStr = echoStr.trim();
+
+        if (echoStr === '') {
+            verboseLog(`pushAction(${args}): no output to print for ${myArray.length} results (echo disabled?).`);
+        } else {
+            verboseLog(`pushAction(${args}): printing ${myArray.length} results ...`);
+            console.log(echoStr);
+            verboseLog(`pushAction(${args}): finished printing ${myArray.length} results ...`);
+        }
+        allPromisesCompleted = true;
+    });
+
+    verboseLog(`pushAction(${args}): waiting for completion (synchronously)...`);
+
+    deasync.loopWhile(() => !allPromisesCompleted);
+
+    verboseLog(`pushAction(${args}): completed ...`);
+
+    return returnStr;
 }
 
 // ---------------------------------------------------------------------
@@ -286,22 +376,21 @@ function getTable(contractName, scopeName, tableName, queryOpts, cleosUrl = "", 
     //   push action, like --force-unique). This allows the caller to use the same options env var for both
     //   push action and get table.
 
-    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${globalOpts} get table ${contractName} ${scopeName} ${tableName} ${queryOpts}`;
+    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${globalOpts} get table ${contractName} ${scopeName} ${tableName} ${queryOpts} 2>&1`;
 
-    // Log it
+    // Log it conditionally
     if (getEcho()) {
         console.log(cleosCmd);
     }
 
     // execSync() throws an exception if cleos (the invoked process) fails, which is what we want.
-    //
     // - Capture the output in a string and return it (so the caller can scan it if needed).
-    // - ALSO echo it (as would be the case in a shell script).
-    const cleosOutput = execSync(cleosCmd, { stdio: 'pipe' }).toString();
+    // - Echo it conditionally (execSync drops stderr, but stderr is piped to stdout with 2>&1 above)
+    const output = execSync(cleosCmd, { stdio: 'pipe' }).toString();
     if (getEchoResult()) {
-        console.log(cleosOutput);
+        console.log(output);
     }
-    return cleosOutput;
+    return output;
 }
 
 // ---------------------------------------------------------------------
@@ -321,24 +410,22 @@ function cleos(cleosParams, cleosUrl = "", cleosWalletUrl = "") {
     let cleosWalletUrlOpt = '';
     if (cleosWalletUrl !== '') { cleosWalletUrlOpt = `--wallet-url ${cleosWalletUrl}`; }
 
-    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${cleosParams}`;
+    let cleosCmd = `cleos ${cleosUrlOpt} ${cleosWalletUrlOpt} ${cleosParams} 2>&1`;
 
-    // Log it
+    // Log it conditionally
     if (getEcho()) {
         console.log(cleosCmd);
     }
 
     // execSync() throws an exception if cleos (the invoked process) fails, which is what we want.
-    //
     // - Capture the output in a string and return it (so the caller can scan it if needed).
-    // - ALSO echo it (as would be the case in a shell script).
-    const cleosOutput = execSync(cleosCmd, { stdio: 'pipe' }).toString();
+    // - Echo it conditionally (execSync drops stderr, but stderr is piped to stdout with 2>&1 above)
+    const output = execSync(cleosCmd, { stdio: 'pipe' }).toString();
     if (getEchoResult()) {
-        console.log(cleosOutput);
+        console.log(output);
     }
-    return cleosOutput;
+    return output;
 }
-
 
 // ---------------------------------------------------------------------
 // ---------------------------------------------------------------------
