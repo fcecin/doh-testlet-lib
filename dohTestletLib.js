@@ -274,7 +274,6 @@ async function singlePushActionAsync(actionData, contractName, actionName, autho
 }
 
 function pushAction(dataFile, contractName, actionName, cleosUrl = "", cleosWalletUrl = "", otherOpts = "") {
-
     let args = `${contractName}, ${actionName}, ${dataFile}`;
 
     if (!fs.existsSync(dataFile)) {
@@ -294,54 +293,68 @@ function pushAction(dataFile, contractName, actionName, cleosUrl = "", cleosWall
         throw new Error(`ERROR: pushAction(${args}): Failed to load data file:` + error);
     }
 
-    verboseLog(`pushAction(${args}): pushing ${myArray.length} items (in parallel)...`);
+    const maxConcurrentTasks = 100;
+    verboseLog(`pushAction(${args}): pushing ${myArray.length} items (in parallel, at most ${maxConcurrentTasks} at a time)...`);
 
     let allPromisesCompleted = false;
-
-    const promises = myArray.map(item => {
-        let argStr = '[' + JSON.stringify(item) + ']';
-        return singlePushActionAsync(argStr, contractName, actionName, contractName, cleosUrl, cleosWalletUrl, otherOpts);
-    });
-
-    // Full result for the caller to use
-    let returnStr = '';
-
-    Promise.all(promises).then(results => {
-        let echoStr = ''; // Compute the conditional echoing
-        results.forEach(res => {
-
-            // command echos are never returned by the function; this is
-            //   consistent with singlePushAction(), getTable() and cleos(),
-            //   which return stdout/stderr only.
-            //returnStr += res[0] + '\n';
-
-            returnStr += res[1] + '\n';
-            if (getEcho()) {
-                echoStr += res[0] + '\n';
+    let currentIndex = 0;
+    let activeTasks = 0;
+    let results = [];
+    const executeNext = async () => {
+        if (currentIndex >= myArray.length) {
+            if (activeTasks === 0) {
+                allPromisesCompleted = true;
             }
-            if (getEchoResult()) {
-                echoStr += res[1] + '\n';
-            }
-        });
-        returnStr = returnStr.trim();
-        echoStr = echoStr.trim();
-
-        if (echoStr === '') {
-            verboseLog(`pushAction(${args}): no output to print for ${myArray.length} results (echo disabled?).`);
-        } else {
-            verboseLog(`pushAction(${args}): printing ${myArray.length} results ...`);
-            console.log(echoStr);
-            verboseLog(`pushAction(${args}): finished printing ${myArray.length} results ...`);
+            return;
         }
-        allPromisesCompleted = true;
-    });
+        activeTasks++;
+        let item = myArray[currentIndex++];
+        let argStr = '[' + JSON.stringify(item) + ']';
+        try {
+            const result = await singlePushActionAsync(argStr, contractName, actionName, contractName, cleosUrl, cleosWalletUrl, otherOpts);
+            results.push(result);
+        } finally {
+            activeTasks--;
+            executeNext();
+        }
+    };
 
-    verboseLog(`pushAction(${args}): waiting for completion (synchronously)...`);
+    // Start initial batch of tasks
+    for (let i = 0; i < Math.min(maxConcurrentTasks, myArray.length); i++) {
+        executeNext();
+    }
+
+    //verboseLog(`pushAction(${args}): waiting for completion (synchronously)...`); // debug only
 
     deasync.loopWhile(() => !allPromisesCompleted);
 
-    verboseLog(`pushAction(${args}): completed ...`);
+    //verboseLog(`pushAction(${args}): completed ...`); // debug only
 
+    // Compute and/or echo combined output
+    let returnStr = ''; // Full result for the caller to use
+    let echoStr = '';   // Compute the conditional echoing
+    results.forEach(res => {
+        // command echos are never returned by the function; this is
+        //   consistent with singlePushAction(), getTable() and cleos(),
+        //   which return stdout/stderr only.
+        //returnStr += res[0] + '\n';
+        returnStr += res[1] + '\n';
+        if (getEcho()) {
+            echoStr += res[0] + '\n';
+        }
+        if (getEchoResult()) {
+            echoStr += res[1] + '\n';
+        }
+    });
+    returnStr = returnStr.trim();
+    echoStr = echoStr.trim();
+    if (echoStr === '') {
+        verboseLog(`pushAction(${args}): no output to print for ${myArray.length} results (echo disabled?).`);
+    } else {
+        verboseLog(`pushAction(${args}): printing ${myArray.length} results ...`);
+        console.log(echoStr);
+        verboseLog(`pushAction(${args}): finished printing ${myArray.length} results ...`);
+    }
     return returnStr;
 }
 
